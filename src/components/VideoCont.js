@@ -1,79 +1,117 @@
-import axios from "axios"
-import React, {useEffect, useRef, useState} from "react"
+import axios from "axios";
+import React, { useEffect, useRef, useState } from "react";
 import "./VideoCont.css";
 
-function VideoCont(){
-const initiateCall = useRef()
-const terminateCall = useRef()
-const [onlineUsers, setOnlineUsers] = useState([])
-const [postedData, setPostedData] = useState(true)
-let userName;
+function VideoCont() {
+  const terminateCall = useRef();
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [postedData, setPostedData] = useState(true);
+  const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
-async function makeCall(){
-    const config = {"iceServers": [{"urls": "stun:stun.l.google.com:19302"}]}
-    const peerConnection = new RTCPeerConnection(config)
-    peerConnection.onicecandidate = ()=>{console.log(peerConnection)}
-    const offer = await peerConnection.createOffer()
-    await peerConnection.setLocalDescription(offer)
-    return offer
-    }
-    
-    const updateOnlineUserStream = new EventSource("http://localhost:3100/subscribeStreamEvnt")
-    updateOnlineUserStream.addEventListener("open", ()=>{
-        console.log("stream is open")
-    })
-    updateOnlineUserStream.addEventListener("error", ()=>{
-        console.log("Opps a error occured")
-    })
-    updateOnlineUserStream.addEventListener("newlyJoinedUsers", (event)=>{
-        setOnlineUsers(JSON.parse(event.data))
-        console.log(JSON.parse(event.data), "parsed data")
-        // console.log("received first stream")
-    })
+  let userName;
 
-    const postData = async function(){
-        try{
-            const res = await axios.post("http://localhost:3100/sendCredentials", {
-                mode: "cors",
-                header: {"Content-Type": "application/json"},
-                data:   {candidate: await makeCall(), username: userName}
-            })
-            setOnlineUsers(res.data)
-            console.log(res.data)
-            setPostedData(false)
-        }
-        catch(err){
-                console.log(err)
-            }
-        }
+  async function makeCall() {
+    const peerConnection = new RTCPeerConnection(config);
+    peerConnection.onicecandidate = () => {
+      console.log(peerConnection);
+    };
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    return offer;
+  }
 
-    const getData = async function(){
-        axios.get("http://localhost:3100/getICECandidates", {
+  async function initiateCall(event) {
+    const peerConnection = new RTCPeerConnection(config);
+    let offer = event.target.getAttribute("data-candidate");
+    peerConnection.setRemoteDescription(
+      new RTCSessionDescription(JSON.parse(offer))
+    );
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    console.log(answer, "tarrr")
+     postOffersToServer(answer, userName)
+    // console.log(answer);
+
+    peerConnection.addEventListener("connectionstatechange", () => {
+      if (peerConnection.connectionstate === "connected") {
+        console.log("Peers connected!");
+      }
+    });
+  }
+
+  const postData = async function () {
+    try {
+      userName = prompt("Username Please...?");
+      const res = await axios.post("http://localhost:3100/sendCredentials", {
         mode: "cors",
-        header: {"Content-Type": "application/json"},
-        })
+        headers: { "Content-Type": "application/json" },
+        data: { candidate: await makeCall(), username: userName },
+      });
+      setOnlineUsers(res.data);
+      console.log(res.data);
+      setPostedData(false);
+    } catch (err) {
+      console.log(err);
     }
-      
-    useEffect(()=>{
-    userName = prompt("Username Please...?")
-    postedData && postData()
+  };
+
+  const getUpdateFromServerAtIntervals = async function () {
+    let res = await axios.get("http://localhost:3100/intervalUpdates", {
+      mode: "cors",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (res.data) {
+      setOnlineUsers(res.data);
+      console.log(res.data);
+      console.log("About making another request to server....");
+      getUpdateFromServerAtIntervals();
+    }
+  };
+
+  const postOffersToServer = async function(answer, currUserName){
+    const res = await axios.post("http://localhost:3100/postOffers", 
+    {
+        answer: answer,
+        username: currUserName
+    },
+    {
+    mode: "cors",
+    headers: {"Content-Type": "application/json"}
     })
+    console.log(answer, currUserName, "wizzy")
+  }
 
 
-    return(
-        <section>
-            <div className="vidCont">
+  useEffect(() => {
+    postedData && postData();
+    !postedData && getUpdateFromServerAtIntervals();
+  });
 
-                <div ref={initiateCall} className="startCall">Start Call!</div>
-                <div ref={terminateCall} className="endCall">End Call</div>
+  return (
+    <section>
+      <div className="vidCont">
+        <div className="startCall">Start Call!</div>
+        <div ref={terminateCall} className="endCall">
+          End Call
+        </div>
 
-                <div>
-                    {onlineUsers && onlineUsers.map((item, index)=>{
-                       return(<div key={index}>{item.username}</div>)
-                    })}
+        <div>
+          {onlineUsers &&
+            onlineUsers.map((item, index) => {
+              return (
+                <div
+                  key={index}
+                  data-candidate={JSON.stringify(item.candidate)}
+                  onClick={initiateCall}
+                >
+                  {item.username}
                 </div>
-            </div>
-        </section>
-    )
+              );
+            })}
+        </div>
+      </div>
+    </section>
+  );
 }
 export default VideoCont;
